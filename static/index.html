@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Call Transcript</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      background: #1a1f2e;
+      border-bottom: 1px solid #2d3748;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    #status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #4a5568;
+      transition: background 0.3s;
+      flex-shrink: 0;
+    }
+    #status-dot.active { background: #48bb78; box-shadow: 0 0 6px #48bb78; }
+    #status-label { font-size: 0.85rem; color: #718096; }
+
+    #banner {
+      display: none;
+      background: #2d3748;
+      text-align: center;
+      padding: 8px;
+      font-size: 0.9rem;
+      color: #a0aec0;
+    }
+
+    .columns {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      gap: 1px;
+      background: #2d3748;
+    }
+    .column {
+      flex: 1;
+      background: #0f1117;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .column-header {
+      padding: 10px 16px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #718096;
+      background: #1a1f2e;
+      border-bottom: 1px solid #2d3748;
+      flex-shrink: 0;
+    }
+    .transcript {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .transcript::-webkit-scrollbar { width: 4px; }
+    .transcript::-webkit-scrollbar-track { background: transparent; }
+    .transcript::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 2px; }
+
+    .msg {
+      max-width: 85%;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    .msg-caller { background: #2a3a5c; align-self: flex-start; }
+    .msg-ai { background: #1e3a2e; align-self: flex-end; }
+    .msg-interim { background: #1a2035; align-self: flex-start; color: #718096; font-style: italic; }
+    .msg-translation { background: #2a2020; align-self: flex-start; color: #a0aec0; }
+    .msg-ai-uk { background: #1a2d20; align-self: flex-end; color: #a0aec0; }
+
+    .label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 2px;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div id="status-dot"></div>
+    <h1>AI Call Transcript</h1>
+    <span id="status-label">Connecting...</span>
+  </header>
+  <div id="banner">Call ended</div>
+  <div class="columns">
+    <div class="column">
+      <div class="column-header">Spanish (ES)</div>
+      <div class="transcript" id="es-col"></div>
+    </div>
+    <div class="column">
+      <div class="column-header">Ukrainian (UK)</div>
+      <div class="transcript" id="uk-col"></div>
+    </div>
+  </div>
+
+  <script>
+    const esCol = document.getElementById('es-col');
+    const ukCol = document.getElementById('uk-col');
+    const dot = document.getElementById('status-dot');
+    const statusLabel = document.getElementById('status-label');
+    const banner = document.getElementById('banner');
+
+    let interimEl = null;
+
+    function scrollBoth() {
+      esCol.scrollTop = esCol.scrollHeight;
+      ukCol.scrollTop = ukCol.scrollHeight;
+    }
+
+    function addMsg(col, text, cls, label) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + cls;
+      if (label) {
+        const l = document.createElement('div');
+        l.className = 'label';
+        l.textContent = label;
+        div.appendChild(l);
+      }
+      div.appendChild(document.createTextNode(text));
+      col.appendChild(div);
+      return div;
+    }
+
+    function addSpacer(col) {
+      const sp = document.createElement('div');
+      sp.style.height = '10px';
+      col.appendChild(sp);
+      return sp;
+    }
+
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(wsProto + '//' + location.host + '/ws/ui');
+
+    ws.onopen = () => {
+      statusLabel.textContent = 'Connected';
+    };
+
+    ws.onclose = () => {
+      dot.classList.remove('active');
+      statusLabel.textContent = 'Disconnected';
+    };
+
+    ws.onmessage = (evt) => {
+      const data = JSON.parse(evt.data);
+
+      if (data.type === 'interim') {
+        if (!interimEl) {
+          interimEl = addMsg(esCol, data.text, 'msg-interim', 'Caller (typing...)');
+          addSpacer(ukCol);
+        } else {
+          interimEl.lastChild.textContent = data.text;
+        }
+        scrollBoth();
+      }
+
+      else if (data.type === 'caller') {
+        if (interimEl) {
+          interimEl.remove();
+          interimEl = null;
+        }
+        addMsg(esCol, data.text, 'msg-caller', 'Caller');
+        addSpacer(ukCol);
+        scrollBoth();
+      }
+
+      else if (data.type === 'translation') {
+        addMsg(ukCol, data.text, 'msg-translation', 'Caller (translated)');
+        addSpacer(esCol);
+        scrollBoth();
+      }
+
+      else if (data.type === 'ai') {
+        dot.classList.add('active');
+        statusLabel.textContent = 'AI speaking';
+        addMsg(esCol, data.text, 'msg-ai', 'AI');
+        if (data.translation) {
+          addMsg(ukCol, data.translation, 'msg-ai-uk', 'AI (caller said)');
+        } else {
+          addSpacer(ukCol);
+        }
+        scrollBoth();
+      }
+
+      else if (data.type === 'status') {
+        if (data.text === 'no_active_call') {
+          statusLabel.textContent = 'No active call';
+          dot.classList.remove('active');
+        } else if (data.text === 'call_ended') {
+          banner.style.display = 'block';
+          dot.classList.remove('active');
+          statusLabel.textContent = 'Call ended';
+        }
+      }
+    };
+  </script>
+</body>
+</html>
